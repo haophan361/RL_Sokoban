@@ -8,7 +8,7 @@ class DQNAgent:
 
     def __init__(self,lr,gamma,batch_size,replay_capacity,epsilon_start,epsilon_end,epsilon_decay,
                 target_update_frequency,device,per_alpha,per_beta_start,per_beta_frames,
-                sil_capacity=50_000, sil_batch_size=128, sil_coeff=0.1):
+                sil_capacity=50_000, sil_batch_size=64, sil_coeff=0.1):
                 
         self.device = device
         self.gamma = gamma

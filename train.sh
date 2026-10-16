@@ -10,6 +10,7 @@ mkdir -p "$PROJECT_ROOT/logs"
 
 RUN_ID="${WANDB_RUN_ID:-}"
 MODEL_PATH="${MODEL_PATH:-}"
+DATASET_PATH="${DATASET_PATH:-}"
 
 EXTRA_ARGS=()
 
@@ -29,6 +30,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --model-path=*|--checkpoint=*|--model=*)
             MODEL_PATH="${1#*=}"
+            shift
+            ;;
+        --dataset-path|--dataset|-d)
+            DATASET_PATH="$2"
+            shift 2
+            ;;
+        --dataset-path=*|--dataset=*)
+            DATASET_PATH="${1#*=}"
             shift
             ;;
         *)
@@ -58,6 +67,13 @@ else
     echo ">>> [Model] Load model from RL/models/ (if exists)"
 fi
 
+if [ -n "$DATASET_PATH" ]; then
+    export DATASET_PATH="$DATASET_PATH"
+    echo ">>> [Dataset] Dataset path: $DATASET_PATH"
+else
+    echo ">>> [Dataset] Default dataset: levels/training_dataset"
+fi
+
 export PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/RL:${PYTHONPATH:-}"
 export PYTHONUNBUFFERED=1
 
@@ -68,4 +84,5 @@ echo "=== Starting Train ==="
 python "$PROJECT_ROOT/RL/training.py" \
     ${MODEL_PATH:+--model-path "$MODEL_PATH"} \
     ${RUN_ID:+--run-id "$RUN_ID"} \
+    ${DATASET_PATH:+--dataset-path "$DATASET_PATH"} \
     "${EXTRA_ARGS[@]}" 2>&1 | tee "$LOG_FILE"

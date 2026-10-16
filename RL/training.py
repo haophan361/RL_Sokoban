@@ -25,12 +25,18 @@ def set_seed(seed: int = 42):
         torch.cuda.manual_seed_all(seed)
 
 def build_dataset(data_split_dir):
-    dataset_paths=[]
+    dataset_paths = []
 
-    for group_path in data_split_dir.iterdir():
-        for path in group_path.iterdir():
-            if path.with_suffix(".json"):
-                dataset_paths.append(path)
+    if not data_split_dir.exists():
+        raise RuntimeError(f"Không tìm thấy thư mục: {data_split_dir}")
+
+    for item in data_split_dir.iterdir():
+        if item.is_dir():
+            for path in item.iterdir():
+                if path.is_file() and path.suffix == ".json":
+                    dataset_paths.append(path)
+        elif item.is_file() and item.suffix == ".json":
+            dataset_paths.append(item)
 
     if len(dataset_paths) == 0:
         raise RuntimeError(f"Không tìm thấy file JSON trong: {data_split_dir}")
@@ -44,29 +50,46 @@ def main():
     seed = 42
 
     base_dir = Path(__file__).parent.parent.resolve()
-    data_dir= base_dir / "levels" / "training_dataset"
 
-    train_dir = data_dir/"train"
-    val_dir = data_dir / "val"
-    test_dir = data_dir / "test"
+    parser = argparse.ArgumentParser(description="Train DQN for Sokoban")
+    parser.add_argument("--model-path", "--checkpoint", "-m", type=str, default=None)
+    parser.add_argument("--run-id", "-r", type=str, default=None)
+    parser.add_argument("--dataset-path", "--dataset", "-d", type=str, default=None)
+    args = parser.parse_args()
+
+    custom_dataset_path = args.dataset_path or os.getenv("DATASET_PATH", "").strip() or None
+    if custom_dataset_path:
+        data_dir = Path(custom_dataset_path)
+        if not data_dir.is_absolute():
+            data_dir = (base_dir / data_dir).resolve()
+        if not data_dir.exists():
+            raise FileNotFoundError(f"Can't find dataset in: {data_dir}")
+        print(f"[Dataset] Using dataset path: {data_dir}")
+    else:
+        data_dir = base_dir / "levels" / "training_dataset"
+
+    if (data_dir / "train").exists():
+        train_dir = data_dir / "train"
+        val_dir = data_dir / "val" if (data_dir / "val").exists() else train_dir
+        test_dir = data_dir / "test" if (data_dir / "test").exists() else None
+    else:
+        train_dir = data_dir
+        val_dir = data_dir
+        test_dir = None
 
     num_episodes = 1_000_000
     max_pushes = 100
-    batch_size = 512
+    batch_size = 256
     learning_rate = 1e-4
     gamma = 0.99
     replay_capacity = 1_000_000
     epsilon_start = 1.0
-    epsilon_end = 0.05
+    epsilon_end = 0.1
     epsilon_decay = 1_500_000 
-    target_update_frequency = 5000
+    target_update_frequency = 2000
     val_every = 10_000
     log_every = 2_000
     n_step = 6
-    parser = argparse.ArgumentParser(description="Train DQN for Sokoban")
-    parser.add_argument("--model-path", "--checkpoint", "-m", type=str, default=None)
-    parser.add_argument("--run-id", "-r", type=str, default=None)
-    args = parser.parse_args()
 
     checkpoint_path = base_dir / "RL" / "models" / "dqn_sokoban_best.pt"
     last_checkpoint_path = base_dir / "RL" / "models" / "dqn_sokoban_last.pt"
@@ -160,6 +183,7 @@ def main():
                     "val_every": val_every,
                     "log_every": log_every,
                     "n_step": n_step,
+                    "dataset_path": str(data_dir),
                 },
             }
             if wandb_run_id:

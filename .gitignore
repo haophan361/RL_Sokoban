@@ -2,6 +2,7 @@ __pycache__
 levels/level*.txt
 preprocess_dataset
 split_val
-RL/models/*.pt
+RL/models/*
+wandb
 
 
