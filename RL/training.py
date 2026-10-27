@@ -84,7 +84,7 @@ def main():
     gamma = 0.99
     replay_capacity = 1_000_000
     epsilon_start = 1.0
-    epsilon_end = 0.1
+    epsilon_end = 0.03
     epsilon_decay = 1_500_000 
     target_update_frequency = 2000
     val_every = 10_000

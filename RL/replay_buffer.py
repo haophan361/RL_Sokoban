@@ -118,10 +118,12 @@ class PrioritizedReplayBuffer:
         return min(1.0, self.beta_start + progress * (1.0 - self.beta_start))
 
     def push(self, state, action, reward, next_state, done, next_action_mask,
-             transition_type: str = "ongoing") -> None:
+             transition_type: str = "ongoing",
+             priority_boost: float = 1.0) -> None:
         t = Transition(state, action, reward, next_state, done, next_action_mask,
                        transition_type)
-        self._tree.add(self._max_priority ** self.alpha, t)
+        priority = (self._max_priority ** self.alpha) * priority_boost
+        self._tree.add(priority, t)
 
     def sample(self, batch_size: int):
         batch, tree_indices, priorities = [], [], []

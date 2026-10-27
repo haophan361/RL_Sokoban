@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from replay_buffer import PrioritizedReplayBuffer, SILBuffer
+from replay_buffer import PrioritizedReplayBuffer
 from dqn import DuelingDQN
 import torch.nn as nn
 
@@ -8,8 +8,8 @@ class DQNAgent:
 
     def __init__(self,lr,gamma,batch_size,replay_capacity,epsilon_start,epsilon_end,epsilon_decay,
                 target_update_frequency,device,per_alpha,per_beta_start,per_beta_frames,
-                sil_capacity=50_000, sil_batch_size=64, sil_coeff=0.1):
-                
+                solve_boost: float = 3.0):
+
         self.device = device
         self.gamma = gamma
         self.batch_size = batch_size
@@ -19,8 +19,7 @@ class DQNAgent:
         self.target_update_frequency = target_update_frequency
         self.total_steps = 0
         self.gradient_steps = 0
-        self.sil_batch_size = sil_batch_size
-        self.sil_coeff = sil_coeff
+        self.solve_boost = solve_boost
 
         self.policy_net = DuelingDQN(in_channels=4).to(device)
         self.target_net = DuelingDQN(in_channels=4).to(device)
@@ -35,7 +34,6 @@ class DQNAgent:
             beta_start=per_beta_start,
             beta_frames=per_beta_frames,
         )
-        self.sil_buffer = SILBuffer(capacity=sil_capacity)
 
     def get_epsilon(self) -> float:
         fraction = min(self.total_steps / self.epsilon_decay, 1.0)
@@ -107,25 +105,6 @@ class DQNAgent:
 
         return float(loss.item())
 
-    def sil_optimize(self) -> float | None:
-        if len(self.sil_buffer) < self.sil_batch_size:
-            return None
-
-        batch = self.sil_buffer.sample(self.sil_batch_size)
-        states_t  = torch.as_tensor(np.stack([x[0] for x in batch]), dtype=torch.float32, device=self.device)
-        actions_t = torch.as_tensor([x[1] for x in batch], dtype=torch.long, device=self.device)
-        returns_t = torch.as_tensor([x[2] for x in batch], dtype=torch.float32, device=self.device)
-
-        q_vals = self.policy_net(states_t).gather(1, actions_t.unsqueeze(1)).squeeze(1)
-        sil_loss = (self.sil_coeff * 0.5 * torch.relu(returns_t - q_vals).pow(2)).mean()
-
-        self.optimizer.zero_grad(set_to_none=True)
-        sil_loss.backward()
-        nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=10.0)
-        self.optimizer.step()
-
-        return float(sil_loss.item())
-
     def save(self, episode, best_val_solve_rate, path):
         torch.save({
             "episode": episode,
@@ -137,26 +116,30 @@ class DQNAgent:
             "target_net": self.target_net.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "replay_buffer": self.replay_buffer.state_dict(),
-            "sil_buffer": self.sil_buffer.state_dict(),
             "total_steps": self.total_steps,
             "gradient_steps": self.gradient_steps,
         }, path)
 
     def load(self, path):
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
-        self.policy_net.load_state_dict(checkpoint["policy_net"])
-        self.target_net.load_state_dict(checkpoint["target_net"])
-        self.optimizer.load_state_dict(checkpoint["optimizer"])
+        self.policy_net.load_state_dict(checkpoint["policy_net"], strict=False)
+        self.target_net.load_state_dict(checkpoint["policy_net"], strict=False)
+
+        if "optimizer" in checkpoint:
+            try:
+                self.optimizer.load_state_dict(checkpoint["optimizer"])
+            except (ValueError, KeyError):
+                print("[LOAD] Optimizer state incompatible with new architecture — RESET")
+
         self.total_steps    = checkpoint.get("total_steps", 0)
         self.gradient_steps = checkpoint.get("gradient_steps", 0)
+
         if "replay_buffer" in checkpoint:
             self.replay_buffer.load_state_dict(checkpoint["replay_buffer"])
             print(f"[LOAD] Replay buffer restored: {len(self.replay_buffer):,} transitions")
         else:
             print("[LOAD] No replay buffer in checkpoint (warm-up will run)")
-        if "sil_buffer" in checkpoint:
-            self.sil_buffer.load_state_dict(checkpoint["sil_buffer"])
-            print(f"[LOAD] SIL buffer restored: {len(self.sil_buffer):,} transitions")
+            
         print(
             f"[LOAD] episode={checkpoint.get('episode', '?')} | "
             f"solve_rate={checkpoint.get('best_val_solve_rate', '?')} | "

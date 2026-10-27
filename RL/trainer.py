@@ -149,7 +149,7 @@ def train_dqn(
         obs = env.reset()
         episode_reward = 0.0
         episode_loss   = []
-        episode_history = []
+        episode_transitions = []
         done  = False
         info  = {}
         n_step_buf = deque(maxlen=n_step)
@@ -169,11 +169,10 @@ def train_dqn(
             )
 
             n_step_buf.append((obs, action, reward, next_obs, done, next_action_mask))
-            episode_history.append((obs, action, reward))
 
             if len(n_step_buf) == n_step:
                 s0, a0, n_reward, sn, done_n, mask_n = _compute_n_step_return(n_step_buf, agent.gamma)
-                agent.replay_buffer.push(s0, a0, n_reward, sn, done_n, mask_n, "ongoing")
+                episode_transitions.append((s0, a0, n_reward, sn, done_n, mask_n))
 
             loss = agent.optimize()
             if loss is not None:
@@ -183,16 +182,9 @@ def train_dqn(
             episode_reward += reward
             agent.total_steps += 1
 
-        ep_type = "ongoing"
-        if info.get("solved"):   ep_type = "solve"
-        elif info.get("deadlock"): ep_type = "deadlock"
-        elif info.get("timeout"): ep_type = "timeout"
-
         while n_step_buf:
             s0, a0, n_reward, sn, done_n, mask_n = _compute_n_step_return(n_step_buf, agent.gamma)
-
-            ttype = ep_type if len(n_step_buf) == 1 else "ongoing"
-            agent.replay_buffer.push(s0, a0, n_reward, sn, done_n, mask_n, ttype)
+            episode_transitions.append((s0, a0, n_reward, sn, done_n, mask_n))
             n_step_buf.popleft()
 
         solved    = info.get("solved", False)
@@ -200,12 +192,21 @@ def train_dqn(
         mean_loss = float(np.mean(episode_loss)) if episode_loss else 0.0
         epsilon   = agent.get_epsilon()
 
-        if solved and episode_history:
-            R = 0.0
-            for s, a, r in reversed(episode_history):
-                R = r + agent.gamma * R
-                agent.sil_buffer.push(s, a, R)
-            agent.sil_optimize()
+        # Push episode transitions to replay buffer with appropriate priority boost and type
+        boost = getattr(agent, "solve_boost", 3.0) if solved else 1.0
+        if info.get("solved"):
+            ep_type = "solve"
+        elif info.get("deadlock"):
+            ep_type = "deadlock"
+        elif info.get("timeout"):
+            ep_type = "timeout"
+        else:
+            ep_type = "ongoing"
+
+        num_t = len(episode_transitions)
+        for idx_t, (s0, a0, nr, sn, dn, mn) in enumerate(episode_transitions):
+            ttype = ep_type if (solved or idx_t == num_t - 1) else "ongoing"
+            agent.replay_buffer.push(s0, a0, nr, sn, dn, mn, transition_type=ttype, priority_boost=boost)
 
         group, level = dataset.get_level_name(level_idx)
         train_tracker.update(group, level, solved, pushes)
@@ -258,11 +259,10 @@ def train_dqn(
                 f"MeanReward: {val_metrics['mean_reward']:8.2f} | "
                 f"MeanPushes: {val_metrics['mean_pushes']:.1f}\n"
                 f"[Buffer {stats['total']:,}] "
-                f"solve={stats['solve_pct']:.1f}% | "
+                f"solve={stats['solve_pct']:.1f}% ({stats['solve']}) | "
                 f"deadlock={stats['deadlock_pct']:.1f}% | "
                 f"timeout={stats['timeout_pct']:.1f}% | "
-                f"ongoing={stats['ongoing_pct']:.1f}% | "
-                f"sil_buf={len(agent.sil_buffer):,}"
+                f"ongoing={stats['ongoing_pct']:.1f}%"
             )
 
             train_tracker.flush()
@@ -282,10 +282,10 @@ def train_dqn(
                     "val/mean_pushes": val_metrics["mean_pushes"],
                     "buffer/total": stats["total"],
                     "buffer/solve_pct": stats["solve_pct"],
+                    "buffer/solve_count": stats["solve"],
                     "buffer/deadlock_pct": stats["deadlock_pct"],
                     "buffer/timeout_pct": stats["timeout_pct"],
                     "buffer/ongoing_pct": stats["ongoing_pct"],
-                    "buffer/sil_buffer_size": len(agent.sil_buffer),
                 }
                 if vs is not None:
                     val_log_payload.update({
