@@ -4,7 +4,7 @@
 #include <set>
 
 SokobanEnv::SokobanEnv(int max_pushes, bool avoid_dead_squares)
-    : max_pushes(max_pushes), avoid_dead_squares(avoid_dead_squares), state({}) {}
+    : max_pushes(max_pushes), avoid_dead_squares(avoid_dead_squares), state() {}
 
 void SokobanEnv::set_level(const std::vector<std::vector<std::string>>& input_matrix,
                            const std::vector<std::pair<int, int>>& input_dead_squares) {
