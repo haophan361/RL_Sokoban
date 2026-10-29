@@ -8,7 +8,6 @@ def _load_json(path):
     with open(path, "r") as f:
         return json.load(f)
 
-
 class SokobanDataset(Dataset):
     def __init__(self, dataset_paths, max_workers: int = None):
         super().__init__()
@@ -44,7 +43,3 @@ class SokobanDataset(Dataset):
     def __getitem__(self, idx):
         data = self.data[idx]
         return data["map_matrix"], data.get("dead_squares", [])
-
-    def get_level_name(self, idx):
-        p = Path(self.paths[idx])
-        return p.parent.name, p.stem

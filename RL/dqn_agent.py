@@ -120,12 +120,12 @@ class DQNAgent:
             "gradient_steps": self.gradient_steps,
         }, path)
 
-    def load(self, path):
+    def load(self, path, load_buffer: bool = True):
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.policy_net.load_state_dict(checkpoint["policy_net"], strict=False)
         self.target_net.load_state_dict(checkpoint["policy_net"], strict=False)
 
-        if "optimizer" in checkpoint:
+        if "optimizer" in checkpoint and load_buffer:
             try:
                 self.optimizer.load_state_dict(checkpoint["optimizer"])
             except (ValueError, KeyError):
@@ -134,9 +134,11 @@ class DQNAgent:
         self.total_steps    = checkpoint.get("total_steps", 0)
         self.gradient_steps = checkpoint.get("gradient_steps", 0)
 
-        if "replay_buffer" in checkpoint:
+        if load_buffer and "replay_buffer" in checkpoint:
             self.replay_buffer.load_state_dict(checkpoint["replay_buffer"])
             print(f"[LOAD] Replay buffer restored: {len(self.replay_buffer):,} transitions")
+        elif not load_buffer:
+            print("[LOAD] Skipped loading replay buffer (eval/inference mode)")
         else:
             print("[LOAD] No replay buffer in checkpoint (warm-up will run)")
             

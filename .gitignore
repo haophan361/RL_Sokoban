@@ -4,5 +4,6 @@ preprocess_dataset
 split_val
 RL/models/*
 wandb
-
-
+RL/cpp/build
+.vscode
+RL/cpp/sokoban_cpp.cp312-win_amd64.pyd
