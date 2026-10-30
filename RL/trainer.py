@@ -123,7 +123,7 @@ def _store_episode_transitions(agent, transitions, info):
         )
 
 
-def train_one_episode(agent, env, dataset, n_step: int = 3, optimize_every: int = 4):
+def train_one_episode(agent, env, dataset, n_step: int = 6):
     level_idx = np.random.randint(len(dataset))
     map_matrix, dead_squares = dataset[level_idx]
     env.set_level(map_matrix, dead_squares)
@@ -136,7 +136,6 @@ def train_one_episode(agent, env, dataset, n_step: int = 3, optimize_every: int 
     info = {}
     n_step_buf = deque(maxlen=n_step)
 
-    # Lấy action_mask ban đầu 1 lần duy nhất
     action_mask = env.get_valid_action_mask()
 
     while not done:
@@ -158,14 +157,11 @@ def train_one_episode(agent, env, dataset, n_step: int = 3, optimize_every: int 
             s0, a0, n_reward, sn, done_n, mask_n = _compute_n_step_return(n_step_buf, agent.gamma)
             episode_transitions.append((s0, a0, n_reward, sn, done_n, mask_n))
 
-        # Điều chỉnh tần suất optimize: Cứ optimize_every steps mới train GPU/Buffer 1 lần
-        if agent.total_steps % optimize_every == 0:
-            loss = agent.optimize()
-            if loss is not None:
-                episode_loss.append(loss)
+        loss = agent.optimize()
+        episode_loss.append(loss)
 
         obs = next_obs
-        action_mask = next_action_mask  # Tái sử dụng mask cho bước sau, không gọi get_valid_action_mask() thừa
+        action_mask = next_action_mask
         episode_reward += reward
         agent.total_steps += 1
 
@@ -267,8 +263,7 @@ def _evaluate_and_checkpoint(agent, env, val_dataset, episode: int,
 def train_dqn(agent, env, dataset, num_episodes, val_dataset, val_every,
               checkpoint_path=None, log_every: int = 100, n_step: int = 3,
               warm_up_steps: int = 10_000, save_every: int = 5_000,
-              resume_best_solve_rate: float = -1.0, start_episode: int = 1,
-              optimize_every: int = 4):
+              resume_best_solve_rate: float = -1.0, start_episode: int = 1):
 
     recent_rewards = deque(maxlen=log_every)
     recent_solved = deque(maxlen=log_every)
@@ -292,7 +287,7 @@ def train_dqn(agent, env, dataset, num_episodes, val_dataset, val_every,
     )
 
     for episode in pbar:
-        ep_stats = train_one_episode(agent, env, dataset, n_step, optimize_every)
+        ep_stats = train_one_episode(agent, env, dataset, n_step)
 
         _log_training_progress(
             pbar, episode, num_episodes, ep_stats,

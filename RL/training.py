@@ -58,13 +58,12 @@ def main():
     gamma = 0.99
     replay_capacity = 1_000_000
     epsilon_start = 1.0
-    epsilon_end = 0.03
+    epsilon_end = 0.1
     epsilon_decay = 1_500_000 
     target_update_frequency = 2000
     val_every = 10_000
     log_every = 2_000
     n_step = 6
-    optimize_every = 4
 
     base_dir = Path(__file__).parent.parent.resolve()
 
@@ -101,7 +100,8 @@ def main():
     )
 
     resume_path = args.model_path or os.getenv("MODEL_PATH", "").strip() or None
-    resume_path = Path(resume_path)
+    if resume_path:
+        resume_path = Path(resume_path)
 
     start_episode= 1
     resume_best_solve_rate = -1.0
@@ -149,7 +149,6 @@ def main():
     wandb.init(**kwargs)
     print(f"[W&B] Initialized run successfully (Run ID: {wandb.run.id}).")
 
-
     best_val_solve_rate = train_dqn(
         agent=agent,
         env=env,
@@ -161,8 +160,7 @@ def main():
         log_every=log_every,
         n_step=n_step,
         resume_best_solve_rate=resume_best_solve_rate,
-        start_episode=start_episode,
-        optimize_every=optimize_every
+        start_episode=start_episode
     )
 
     wandb.finish()
