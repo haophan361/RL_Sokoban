@@ -295,15 +295,6 @@ StepResult SokobanEnv::step(int action_id) {
         done = true;
     }
 
-    if (!solved) {
-        int new_boxes_on_dock = count_boxes_on_goal();
-        int delta = new_boxes_on_dock - this->boxes_on_dock;
-        if (delta != 0) {
-            reward += delta * 10.0f;
-        }
-        this->boxes_on_dock = new_boxes_on_dock;
-    }
-
     StepInfo info;
     info.invalid_action = false;
     info.solved = solved;
