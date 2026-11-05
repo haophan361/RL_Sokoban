@@ -59,11 +59,11 @@ def main():
     replay_capacity = 1_000_000
     epsilon_start = 1.0
     epsilon_end = 0.1
-    epsilon_decay = 1_500_000 
-    target_update_frequency = 2000
+    epsilon_decay = 8_000_000 
+    target_update_frequency = 1000
     val_every = 10_000
     log_every = 2_000
-    n_step = 6
+    n_step = 3
 
     base_dir = Path(__file__).parent.parent.resolve()
 

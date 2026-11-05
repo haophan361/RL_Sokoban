@@ -7,3 +7,4 @@ wandb
 RL/cpp/build
 .vscode
 RL/cpp/sokoban_cpp.cp312-win_amd64.pyd
+sokoban-dqn-training.ipynb
