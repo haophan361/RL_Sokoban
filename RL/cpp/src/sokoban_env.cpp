@@ -1,4 +1,5 @@
 #include "sokoban_env.h"
+#include "reward_shaping.h"
 #include <algorithm>
 #include <queue>
 #include <set>
@@ -26,14 +27,22 @@ void SokobanEnv::set_level(const std::vector<std::vector<std::string>>& input_ma
     this->boxes_on_dock = count_boxes_on_goal();
 }
 
-bool SokobanEnv::is_dead_lock(bool avoid_dead_squares) {
+bool SokobanEnv::is_dead_lock(bool avoid_dead_squares) const {
+    return is_dead_lock(this->state, avoid_dead_squares);
+}
+
+bool SokobanEnv::is_dead_lock(const State& state, bool avoid_dead_squares) const {
     DeadlockDetector detector;
-    std::vector<std::pair<int, int>> boxes_pos = this->state.get_boxes_position();
+    std::vector<std::pair<int, int>> boxes_pos = state.get_boxes_position();
 
     if (avoid_dead_squares) {
         for (const auto& [y, x] : boxes_pos) {
-            if (is_dead_squares[y][x]) {
-                return true;
+            if (y >= 0 && y < static_cast<int>(is_dead_squares.size()) &&
+                x >= 0 && x < static_cast<int>(is_dead_squares[0].size()) &&
+                is_dead_squares[y][x]) {
+                if (state.get_matrix_element(y, x) != '*') {
+                    return true;
+                }
             }
         }
     }
@@ -42,7 +51,9 @@ bool SokobanEnv::is_dead_lock(bool avoid_dead_squares) {
         if (state.get_matrix_element(pos.first, pos.second) == '*') {
             continue;
         }
-        if (detector.is_corner_deadlock(this->state, pos) || detector.is_freeze_deadlock(this->state, pos)) {
+
+        if (detector.is_corner_deadlock(state, pos) ||
+            detector.is_freeze_deadlock(state, pos)) {
             return true;
         }
     }
@@ -53,6 +64,11 @@ void SokobanEnv::reset() {
     this->state = this->initial_state;
     this->step_count = 0;
     this->boxes_on_dock = count_boxes_on_goal();
+
+    this->last_potential = RewardShaping::compute_potential(
+        *this, this->state, -200.0f, this->astar_max_nodes
+    );
+
     get_observation();
 }
 
@@ -67,9 +83,61 @@ int SokobanEnv::count_boxes_on_goal() {
     return sum;
 }
 
-bool SokobanEnv::is_walkable(int y, int x) {
-    char cell = this->state.get_matrix_element(y, x);
+bool SokobanEnv::is_walkable(int y, int x) const {
+    return is_walkable(this->state, y, x);
+}
+
+bool SokobanEnv::is_walkable(const State& s, int y, int x) const {
+    char cell = s.get_matrix_element(y, x);
     return (cell == ' ' || cell == '.' || cell == '@');
+}
+
+std::vector<bool> SokobanEnv::get_reachable_mask(const State& s) const {
+    int H = s.height;
+    int W = s.width;
+    std::vector<bool> reachable(H * W, false);
+
+    if (s.worker_y < 0 || s.worker_y >= H || s.worker_x < 0 || s.worker_x >= W) {
+        return reachable;
+    }
+
+    std::queue<std::pair<int, int>> q;
+    q.push({s.worker_y, s.worker_x});
+    reachable[s.worker_y * W + s.worker_x] = true;
+
+    while (!q.empty()) {
+        auto [cy, cx] = q.front();
+        q.pop();
+
+        for (const auto& [dy, dx] : ACTIONS) {
+            int ny = cy + dy;
+            int nx = cx + dx;
+            if (ny < 0 || ny >= H || nx < 0 || nx >= W) continue;
+            int idx = ny * W + nx;
+            if (reachable[idx]) continue;
+
+            char cell = s.get_matrix_element(ny, nx);
+            if (cell == ' ' || cell == '.' || cell == '@') {
+                reachable[idx] = true;
+                q.push({ny, nx});
+            }
+        }
+    }
+    return reachable;
+}
+
+std::pair<int, int> SokobanEnv::get_normalized_player_pos(const State& s) const {
+    int H = s.height;
+    int W = s.width;
+    auto mask = get_reachable_mask(s);
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            if (mask[y * W + x]) {
+                return {y, x};
+            }
+        }
+    }
+    return {s.worker_y, s.worker_x};
 }
 
 std::map<std::pair<int, int>, std::vector<int>> SokobanEnv::get_player_reachable_path() {
@@ -112,7 +180,7 @@ std::map<std::pair<int, int>, std::vector<int>> SokobanEnv::get_player_reachable
     return paths;
 }
 
-bool SokobanEnv::is_in_list(std::pair<int, int> pos, const std::vector<std::pair<int, int>>& list_pos) {
+bool SokobanEnv::is_in_list(std::pair<int, int> pos, const std::vector<std::pair<int, int>>& list_pos) const {
     auto it = std::find(list_pos.begin(), list_pos.end(), pos);
     return it != list_pos.end();
 }
@@ -143,35 +211,51 @@ std::optional<std::vector<int>> SokobanEnv::find_path_to_push(int box_y, int box
     return it->second;
 }
 
-std::vector<int> SokobanEnv::valid_push(bool avoid_dead) {
+std::vector<int> SokobanEnv::valid_push(bool avoid_dead) const {
+    return valid_push(this->state, avoid_dead);
+}
+
+std::vector<int> SokobanEnv::valid_push(const State& state, bool avoid_dead) const {
     std::vector<int> valid_pushs;
-    std::vector<std::pair<int, int>> boxes_pos = this->state.get_boxes_position();
-    auto reachable = get_player_reachable_path();
+    int H = state.height;
+    int W = state.width;
+    auto reachable = get_reachable_mask(state);
+    auto boxes_pos = state.get_boxes_position();
 
     for (const auto& [box_y, box_x] : boxes_pos) {
         for (size_t i = 0; i < ACTIONS.size(); ++i) {
             auto [dy, dx] = ACTIONS[i];
-            std::pair<int, int> destination = {box_y + dy, box_x + dx};
+            int dest_y = box_y + dy;
+            int dest_x = box_x + dx;
 
-            char cell = state.get_matrix_element(destination.first, destination.second);
+            if (dest_y < 0 || dest_y >= H || dest_x < 0 || dest_x >= W) {
+                continue;
+            }
+
+            char cell = state.get_matrix_element(dest_y, dest_x);
             if (cell != '.' && cell != ' ') {
                 continue;
             }
 
-            if (is_in_list(destination, boxes_pos)) {
+            if (is_in_list({dest_y, dest_x}, boxes_pos)) {
                 continue;
             }
 
-            if (avoid_dead && is_dead_squares[destination.first][destination.second] && !is_in_list(destination, docks_position)) {
+            if (avoid_dead && is_dead_squares[dest_y][dest_x] && !is_in_list({dest_y, dest_x}, docks_position)) {
                 continue;
             }
 
-            std::pair<int, int> player_target = {box_y - dy, box_x - dx};
-            if (reachable.count(player_target) == 0) {
+            int player_target_y = box_y - dy;
+            int player_target_x = box_x - dx;
+            if (player_target_y < 0 || player_target_y >= H || player_target_x < 0 || player_target_x >= W) {
                 continue;
             }
 
-            int action_id = (box_y * this->state.width + box_x) * 4 + static_cast<int>(i);
+            if (!reachable[player_target_y * W + player_target_x]) {
+                continue;
+            }
+
+            int action_id = (box_y * W + box_x) * 4 + static_cast<int>(i);
             valid_pushs.push_back(action_id);
         }
     }
@@ -179,8 +263,10 @@ std::vector<int> SokobanEnv::valid_push(bool avoid_dead) {
 }
 
 std::vector<bool> SokobanEnv::get_valid_action_mask() {
+
     std::vector<bool> mask(num_actions, false);
     std::vector<int> actions = valid_push(this->avoid_dead_squares);
+    
     for (int action_id : actions) {
         if (action_id >= 0 && action_id < num_actions) {
             mask[action_id] = true;
@@ -219,7 +305,7 @@ std::vector<float> SokobanEnv::get_observation() {
     return obs;
 }
 
-std::optional<std::tuple<int, int, int>> SokobanEnv::action_id_to_position_direction(int action_id) {
+std::optional<std::tuple<int, int, int>> SokobanEnv::action_id_to_position_direction(int action_id) const {
     if (action_id < 0 || action_id >= num_actions) {
         return std::nullopt;
     }
@@ -244,6 +330,7 @@ StepResult SokobanEnv::return_by_step(float reward, bool done, bool invalid_acti
     return StepResult{get_observation(), reward, done, info};
 }
 
+
 StepResult SokobanEnv::step(int action_id) {
     auto res = action_id_to_position_direction(action_id);
     if (!res.has_value()) {
@@ -256,13 +343,9 @@ StepResult SokobanEnv::step(int action_id) {
         return return_by_step(-5.0f, false, true, false, false);
     }
 
-    for (const auto& move_action : *paths) {
-        auto [dy, dx] = ACTIONS[move_action];
-        this->state.move(dy, dx);
-    }
-
+    int player_moves = static_cast<int>(paths->size());
     auto [dy, dx] = ACTIONS[direction];
-    this->state.move(dy, dx);
+    this->state.apply_push_action(box_y, box_x, dy, dx);
 
     step_count += 1;
 
@@ -295,13 +378,32 @@ StepResult SokobanEnv::step(int action_id) {
         done = true;
     }
 
+    float potential_before = this->last_potential;
+    float potential_after;
+
+    if (solved) {
+        potential_after = 0.0f;
+    } else if (done) {
+        potential_after = -200.0f;
+    } else {
+        potential_after = RewardShaping::compute_potential(
+            *this, this->state, -200.0f, this->astar_max_nodes
+        );
+    }
+
+    float shaping = RewardShaping::compute_shaping_reward(
+        potential_before, potential_after, 0.99f
+    );
+    reward += shaping;
+    this->last_potential = potential_after;
+
     StepInfo info;
     info.invalid_action = false;
     info.solved = solved;
     info.deadlock = deadlock;
     info.timeout = timeout;
     info.pushes = this->step_count;
-    info.player_moves = static_cast<int>(paths->size());
+    info.player_moves = player_moves;
 
     return StepResult{get_observation(), reward, done, info};
 }

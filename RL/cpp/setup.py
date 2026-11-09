@@ -23,6 +23,7 @@ sources = [
     "src/deadlock_detector.cpp",
     "src/sokoban_env.cpp",
     "src/step_info.cpp",
+    "src/reward_shaping.cpp",
 ]
 
 ext_modules = [

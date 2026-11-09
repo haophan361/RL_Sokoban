@@ -29,6 +29,7 @@ public:
     bool is_complete() const;
     void move_box(int y_box, int x_box, int move_y, int move_x);
     void move(int dy, int dx);
+    void apply_push_action(int box_y, int box_x, int dy, int dx);
     void print_state() const;
     State clone() const;
 
