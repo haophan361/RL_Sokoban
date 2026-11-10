@@ -49,6 +49,9 @@ public:
         return arr;
     }
 
+    bool get_enable_reward_shaping() const { return env.enable_reward_shaping; }
+    void set_enable_reward_shaping(bool val) { env.enable_reward_shaping = val; }
+
     int num_actions() const { return env.num_actions; }
     int height() const { return env.state.height; }
     int width() const { return env.state.width; }
@@ -78,6 +81,7 @@ PYBIND11_MODULE(sokoban_cpp, m) {
         .def("reset", &PySokobanEnv::reset)
         .def("step", &PySokobanEnv::step, py::arg("action"))
         .def("get_valid_action_mask", &PySokobanEnv::get_valid_action_mask)
+        .def_property("enable_reward_shaping", &PySokobanEnv::get_enable_reward_shaping, &PySokobanEnv::set_enable_reward_shaping)
         .def_property_readonly("num_actions", &PySokobanEnv::num_actions)
         .def_property_readonly("height", &PySokobanEnv::height)
         .def_property_readonly("width", &PySokobanEnv::width)

@@ -25,6 +25,7 @@ public:
     int boxes_on_dock = 0;
     float last_potential = -200.0f;
     int astar_max_nodes = 50000;
+    bool enable_reward_shaping = true;
 
     std::vector<std::string> matrix;
     std::vector<std::vector<bool>> is_dead_squares;

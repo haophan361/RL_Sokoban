@@ -65,9 +65,13 @@ void SokobanEnv::reset() {
     this->step_count = 0;
     this->boxes_on_dock = count_boxes_on_goal();
 
-    this->last_potential = RewardShaping::compute_potential(
-        *this, this->state, -200.0f, this->astar_max_nodes
-    );
+    if (this->enable_reward_shaping) {
+        this->last_potential = RewardShaping::compute_potential(
+            *this, this->state, -200.0f, this->astar_max_nodes
+        );
+    } else {
+        this->last_potential = 0.0f;
+    }
 
     get_observation();
 }
@@ -378,24 +382,26 @@ StepResult SokobanEnv::step(int action_id) {
         done = true;
     }
 
-    float potential_before = this->last_potential;
-    float potential_after;
+    if (this->enable_reward_shaping) {
+        float potential_before = this->last_potential;
+        float potential_after;
 
-    if (solved) {
-        potential_after = 0.0f;
-    } else if (done) {
-        potential_after = -200.0f;
-    } else {
-        potential_after = RewardShaping::compute_potential(
-            *this, this->state, -200.0f, this->astar_max_nodes
+        if (solved) {
+            potential_after = 0.0f;
+        } else if (done) {
+            potential_after = -200.0f;
+        } else {
+            potential_after = RewardShaping::compute_potential(
+                *this, this->state, -200.0f, this->astar_max_nodes
+            );
+        }
+
+        float shaping = RewardShaping::compute_shaping_reward(
+            potential_before, potential_after, 0.99f
         );
+        reward += shaping;
+        this->last_potential = potential_after;
     }
-
-    float shaping = RewardShaping::compute_shaping_reward(
-        potential_before, potential_after, 0.99f
-    );
-    reward += shaping;
-    this->last_potential = potential_after;
 
     StepInfo info;
     info.invalid_action = false;

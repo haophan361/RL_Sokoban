@@ -70,7 +70,6 @@ AStarResult RewardShaping::astar_search(
 ) {
     AStarResult result{false, 0};
 
-    // 1. Kiểm tra đã giải xong chưa
     if (state.is_complete()) {
         result.solved = true;
         result.pushes = 0;

@@ -143,28 +143,24 @@ void State::move(int dy, int dx) {
 }
 
 void State::apply_push_action(int box_y, int box_x, int dy, int dx) {
-    // 1. Xóa player ở vị trí cũ
     if (worker_y >= 0 && worker_y < height && worker_x >= 0 && worker_x < width) {
         matrix[worker_y][worker_x] = ' ';
     }
 
-    // 2. Di chuyển hộp từ (box_y, box_x) sang (dest_y, dest_x)
     int dest_y = box_y + dy;
     int dest_x = box_x + dx;
-    matrix[dest_y][dest_x] = '$'; // Tạm thời đặt là box
+    matrix[dest_y][dest_x] = '$'; 
 
-    // 3. Player đứng vào vị trí cũ của hộp
     worker_y = box_y;
     worker_x = box_x;
     matrix[worker_y][worker_x] = '@';
 
-    // 4. Khôi phục các dock '.' hoặc '*'
     for (const auto& [i, j] : docks_position) {
         char c = matrix[i][j];
         if (c == '$') {
-            matrix[i][j] = '*'; // Box trên dock
+            matrix[i][j] = '*';
         } else if (c != '*' && c != '@') {
-            matrix[i][j] = '.'; // Dock trống
+            matrix[i][j] = '.';
         }
     }
 }

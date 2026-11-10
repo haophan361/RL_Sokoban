@@ -25,30 +25,38 @@ def evaluate(agent, env, dataset):
     total_reward = 0.0
     push_list = []
 
-    for idx in range(len(dataset)):
-        map_matrix, dead_squares = dataset[idx]
-        env.set_level(map_matrix, dead_squares)
-        obs = env.reset()
+    prev_shaping = getattr(env, "enable_reward_shaping", False)
+    if hasattr(env, "enable_reward_shaping"):
+        env.enable_reward_shaping = False
 
-        episode_reward = 0.0
-        done = False
-        info = {}
+    try:
+        for idx in range(len(dataset)):
+            map_matrix, dead_squares = dataset[idx]
+            env.set_level(map_matrix, dead_squares)
+            obs = env.reset()
 
-        while not done:
-            action_mask = env.get_valid_action_mask()
-            if not action_mask.any():
-                break
+            episode_reward = 0.0
+            done = False
+            info = {}
 
-            action = agent.select_action(obs, action_mask, training=False)
-            obs, reward, done, info = env.step(action)
-            episode_reward += reward
+            while not done:
+                action_mask = env.get_valid_action_mask()
+                if not action_mask.any():
+                    break
 
-        solved = info.get("solved", False)
-        pushes = info.get("pushes", env.step_count)
-        total_reward += episode_reward
-        if solved:
-            solved_count += 1
-            push_list.append(pushes)
+                action = agent.select_action(obs, action_mask, training=False)
+                obs, reward, done, info = env.step(action)
+                episode_reward += reward
+
+            solved = info.get("solved", False)
+            pushes = info.get("pushes", env.step_count)
+            total_reward += episode_reward
+            if solved:
+                solved_count += 1
+                push_list.append(pushes)
+    finally:
+        if hasattr(env, "enable_reward_shaping"):
+            env.enable_reward_shaping = prev_shaping
 
     n = len(dataset)
     return {
