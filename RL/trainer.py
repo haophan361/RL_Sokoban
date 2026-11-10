@@ -29,8 +29,16 @@ def evaluate(agent, env, dataset):
     if hasattr(env, "enable_reward_shaping"):
         env.enable_reward_shaping = False
 
+    val_pbar = tqdm(
+        range(len(dataset)),
+        desc="Evaluating",
+        unit="lvl",
+        leave=False,
+        dynamic_ncols=True,
+    )
+
     try:
-        for idx in range(len(dataset)):
+        for idx in val_pbar:
             map_matrix, dead_squares = dataset[idx]
             env.set_level(map_matrix, dead_squares)
             obs = env.reset()
@@ -54,7 +62,13 @@ def evaluate(agent, env, dataset):
             if solved:
                 solved_count += 1
                 push_list.append(pushes)
+
+            val_pbar.set_postfix(
+                solved=f"{solved_count}/{idx + 1}",
+                sr=f"{solved_count / (idx + 1) * 100:.1f}%"
+            )
     finally:
+        val_pbar.close()
         if hasattr(env, "enable_reward_shaping"):
             env.enable_reward_shaping = prev_shaping
 
@@ -64,48 +78,6 @@ def evaluate(agent, env, dataset):
         "mean_reward": total_reward / n,
         "mean_pushes": float(np.mean(push_list)) if push_list else 0.0,
     }
-
-
-def warmup_replay_buffer(agent, env, dataset, warm_up_steps: int, n_step: int = 3):
-    tqdm.write(f"[Warm-up] Filling replay buffer ({warm_up_steps} random steps)...")
-
-    level_idx = np.random.randint(len(dataset))
-    map_matrix, dead_squares = dataset[level_idx]
-    env.set_level(map_matrix, dead_squares)
-    obs = env.reset()
-
-    wu_buf = deque(maxlen=n_step)
-    for _ in range(warm_up_steps):
-        action_mask = env.get_valid_action_mask()
-        if not action_mask.any():
-            level_idx = np.random.randint(len(dataset))
-            map_matrix, dead_squares = dataset[level_idx]
-            env.set_level(map_matrix, dead_squares)
-            obs = env.reset()
-            wu_buf.clear()
-            continue
-
-        action = int(np.random.choice(np.flatnonzero(action_mask)))
-        next_obs, reward, done, _ = env.step(action)
-        next_mask = (
-            np.zeros(env.num_actions, dtype=np.bool_)
-            if done else env.get_valid_action_mask()
-        )
-        wu_buf.append((obs, action, reward, next_obs, done, next_mask))
-
-        if len(wu_buf) == n_step:
-            s0, a0, nr, sn, dn, mn = _compute_n_step_return(wu_buf, agent.gamma)
-            agent.replay_buffer.push(s0, a0, nr, sn, dn, mn)
-
-        obs = next_obs
-        if done:
-            level_idx = np.random.randint(len(dataset))
-            map_matrix, dead_squares = dataset[level_idx]
-            env.set_level(map_matrix, dead_squares)
-            obs = env.reset()
-            wu_buf.clear()
-
-    tqdm.write(f"[Warm-up] Done. Buffer size: {len(agent.replay_buffer):,}")
 
 
 def _store_episode_transitions(agent, transitions, info):
@@ -270,8 +242,8 @@ def _evaluate_and_checkpoint(agent, env, val_dataset, episode: int,
 
 def train_dqn(agent, env, dataset, num_episodes, val_dataset, val_every,
               checkpoint_path=None, log_every: int = 100, n_step: int = 3,
-              warm_up_steps: int = 10_000, save_every: int = 5_000,
-              resume_best_solve_rate: float = -1.0, start_episode: int = 1):
+              save_every: int = 5_000, resume_best_solve_rate: float = -1.0,
+              start_episode: int = 1):
 
     recent_rewards = deque(maxlen=log_every)
     recent_solved = deque(maxlen=log_every)
@@ -281,9 +253,6 @@ def train_dqn(agent, env, dataset, num_episodes, val_dataset, val_every,
         Path(checkpoint_path).parent / "dqn_sokoban_last.pt"
         if checkpoint_path else None
     )
-
-    if warm_up_steps > 0 and len(agent.replay_buffer) < agent.batch_size:
-        warmup_replay_buffer(agent, env, dataset, warm_up_steps, n_step)
 
     pbar = tqdm(
         range(start_episode, num_episodes + 1),
