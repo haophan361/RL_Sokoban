@@ -31,10 +31,11 @@ def evaluate(agent, env, dataset):
 
     val_pbar = tqdm(
         range(len(dataset)),
-        desc="Evaluating",
-        unit="lvl",
+        desc="Eval",
+        unit="eps",
         leave=False,
         dynamic_ncols=True,
+        mininterval=1.0,
     )
 
     try:
@@ -63,10 +64,8 @@ def evaluate(agent, env, dataset):
                 solved_count += 1
                 push_list.append(pushes)
 
-            val_pbar.set_postfix(
-                solved=f"{solved_count}/{idx + 1}",
-                sr=f"{solved_count / (idx + 1) * 100:.1f}%"
-            )
+            val_pbar.set_postfix(sr=f"{solved_count / (idx + 1) * 100:.1f}%",refresh=False)
+            
     finally:
         val_pbar.close()
         if hasattr(env, "enable_reward_shaping"):
