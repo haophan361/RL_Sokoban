@@ -33,9 +33,8 @@ def evaluate(agent, env, dataset):
         range(len(dataset)),
         desc="Eval",
         unit="eps",
-        leave=False,
         dynamic_ncols=True,
-        mininterval=1.0,
+        mininterval=1.0
     )
 
     try:
