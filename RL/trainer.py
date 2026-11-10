@@ -63,7 +63,7 @@ def evaluate(agent, env, dataset):
                 solved_count += 1
                 push_list.append(pushes)
 
-            val_pbar.set_postfix(sr=f"{solved_count / (idx + 1) * 100:.1f}%",refresh=False)
+            val_pbar.set_postfix(sr=f"{solved_count / (idx + 1) * 100:.1f}%")
             
     finally:
         val_pbar.close()
