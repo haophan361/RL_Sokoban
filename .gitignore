@@ -8,3 +8,4 @@ RL/cpp/build
 .vscode
 RL/cpp/sokoban_cpp.cp312-win_amd64.pyd
 sokoban-dqn-training.ipynb
+RL/cpp/sokoban_cpp.cpython-312-x86_64-linux-gnu.so

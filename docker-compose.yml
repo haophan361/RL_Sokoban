@@ -1,0 +1,29 @@
+services:
+  sokoban_dqn:
+    build:
+      context: .
+      dockerfile: dockerfile
+    
+    image: sokoban/torch-pybind11
+    container_name: sokoban-training
+
+    working_dir: /app
+    
+    volumes:
+      - ./:/app
+    
+    deploy:
+      resources:
+        reservations: 
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    environment:
+      - PYTHONUNBUFFERED=1
+
+    command: ["sleep", "infinity"]
+
+    stdin_open: true
+    tty: true
