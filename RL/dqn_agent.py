@@ -51,9 +51,9 @@ class DQNAgent:
             return int(np.random.choice(valid_actions))
 
         state_tensor = torch.as_tensor(observation, dtype=torch.float32, device=self.device).unsqueeze(0)
-        q_values = self.policy_net(state_tensor)[0]
-        mask_tensor = torch.as_tensor(action_mask, dtype=torch.bool, device=self.device)
-        q_values = q_values.masked_fill(~mask_tensor, -torch.inf)
+        mask_tensor  = torch.as_tensor(action_mask, dtype=torch.bool, device=self.device).unsqueeze(0)
+        q_values = self.policy_net(state_tensor, action_mask=mask_tensor)[0]
+        q_values = q_values.masked_fill(~mask_tensor[0], -torch.inf)
         return int(torch.argmax(q_values).item())
 
     def optimize(self):
@@ -74,11 +74,11 @@ class DQNAgent:
 
         with torch.no_grad():
 
-            next_q_policy = self.policy_net(next_states)
+            next_q_policy = self.policy_net(next_states, action_mask=next_masks)
             next_q_policy = next_q_policy.masked_fill(~next_masks, -1e9)
             best_next_actions = next_q_policy.argmax(dim=1, keepdim=True)
 
-            next_q_target = self.target_net(next_states)
+            next_q_target = self.target_net(next_states, action_mask=next_masks)
             next_q = next_q_target.gather(1, best_next_actions).squeeze(1)
 
             terminal_mask = dones | ~next_masks.any(dim=1)

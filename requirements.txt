@@ -1,3 +1,5 @@
 torch
 pybind11
 wandb
+numpy
+tqdm

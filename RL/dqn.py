@@ -104,7 +104,7 @@ class DuelingDQN(nn.Module):
 
         self.advantage_stream = nn.Conv2d(d_model, 4, kernel_size=1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, action_mask: torch.Tensor = None) -> torch.Tensor:
         B = x.shape[0]
 
         h = self.conv1(x)           # (B, 64,     H, W)
@@ -122,5 +122,13 @@ class DuelingDQN(nn.Module):
         advantage = self.advantage_stream(h)                      # (B, 4, H, W)
         adv_flat = advantage.permute(0, 2, 3, 1).contiguous().view(B, -1)  # (B, H*W*4)
 
-        q = value + adv_flat - adv_flat.mean(dim=1, keepdim=True)
+        if action_mask is not None:
+
+            mask_f    = action_mask.float()                                   # (B, num_actions)
+            num_valid = mask_f.sum(dim=1, keepdim=True).clamp(min=1)
+            mean_adv  = (adv_flat * mask_f).sum(dim=1, keepdim=True) / num_valid
+        else:
+            mean_adv = adv_flat.mean(dim=1, keepdim=True)
+
+        q = value + adv_flat - mean_adv
         return q
