@@ -66,11 +66,14 @@ void SokobanEnv::reset() {
     this->boxes_on_dock = count_boxes_on_goal();
 
     if (this->enable_reward_shaping) {
-        this->last_potential = RewardShaping::compute_potential(
-            *this, this->state, -200.0f, this->astar_max_nodes
+        AStarResult res = RewardShaping::astar_search(
+            *this, this->state, this->astar_max_nodes
         );
+        this->last_potential = res.solved ? static_cast<float>(-res.pushes) : -200.0f;
+        this->last_potential_valid = res.solved;
     } else {
         this->last_potential = 0.0f;
+        this->last_potential_valid = true;
     }
 
     get_observation();
@@ -374,33 +377,50 @@ StepResult SokobanEnv::step(int action_id) {
     if (solved) {
         reward += 100.0f;
         done = true;
-    } else if (deadlock) {
+    } 
+    else if (deadlock) {
         reward -= 100.0f;
         done = true;
-    } else if (timeout) {
+    } 
+    else if (timeout) {
         reward -= 10.0f;
         done = true;
     }
 
     if (this->enable_reward_shaping) {
         float potential_before = this->last_potential;
+        bool  potential_before_valid = this->last_potential_valid;
+
         float potential_after;
+        bool  potential_after_valid;
 
         if (solved) {
-            potential_after = 0.0f;
-        } else if (done) {
-            potential_after = -200.0f;
-        } else {
-            potential_after = RewardShaping::compute_potential(
-                *this, this->state, -200.0f, this->astar_max_nodes
-            );
+            potential_after       = 0.0f;
+            potential_after_valid = true;
+        }
+        else if (deadlock) {
+            potential_after       = -101.0f;
+            potential_after_valid = true;
+        } 
+        else if (timeout) {
+            potential_after       = -11.0f;
+            potential_after_valid = true;
+        } 
+        else {
+            AStarResult res = RewardShaping::astar_search(*this, this->state, this->astar_max_nodes);
+            potential_after = res.solved ? static_cast<float>(-res.pushes) : -200.0f;
+            potential_after_valid = res.solved;
         }
 
-        float shaping = RewardShaping::compute_shaping_reward(
-            potential_before, potential_after, 0.99f
-        );
-        reward += shaping;
-        this->last_potential = potential_after;
+        if (potential_before_valid && potential_after_valid) {
+            float shaping = RewardShaping::compute_shaping_reward(
+                potential_before, potential_after, 0.99f
+            );
+            reward += shaping;
+        }
+
+        this->last_potential       = potential_after;
+        this->last_potential_valid = potential_after_valid;
     }
 
     StepInfo info;

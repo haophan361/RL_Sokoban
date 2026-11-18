@@ -24,6 +24,7 @@ public:
     bool avoid_dead_squares = false;
     int boxes_on_dock = 0;
     float last_potential = -200.0f;
+    bool  last_potential_valid = false;
     int astar_max_nodes = 50000;
     bool enable_reward_shaping = true;
 
