@@ -3,21 +3,20 @@ from tqdm import tqdm
 from collections import deque
 from pathlib import Path
 import wandb
-
+from replay_buffer import SolvedPush
 
 def _compute_n_step_return(buf: deque, gamma: float):
-    s0, a0 = buf[0][0], buf[0][1]
+    s0, a0, m0, *_ = buf[0]
     n_reward = 0.0
     g = 1.0
 
-    for _, _, r, sn_i, done_i, mask_i in buf:
+    for n_steps, (_, _, _, r, sn, done, next_mask) in enumerate(buf, start=1):
         n_reward += g * r
         g *= gamma
-        if done_i:
-            return s0, a0, n_reward, sn_i, True, mask_i
+        if done:
+            break
 
-    last = buf[-1]
-    return s0, a0, n_reward, last[3], last[4], last[5]
+    return s0, a0, n_reward, sn, done, next_mask, m0, n_steps
 
 
 def evaluate(agent, env, dataset):
@@ -92,16 +91,21 @@ def _store_episode_transitions(agent, transitions, info):
         ep_type = "ongoing"
 
     num_t = len(transitions)
-    for idx_t, (s0, a0, nr, sn, dn, mn) in enumerate(transitions):
+    for idx_t, (s0, a0, nr, sn, dn, mn, m0, n_steps) in enumerate(transitions):
         ttype = ep_type if (solved or idx_t == num_t - 1) else "ongoing"
         agent.replay_buffer.push(
             s0, a0, nr, sn, dn, mn,
             transition_type=ttype,
-            priority_boost=boost
+            priority_boost=boost,
+            action_mask=m0,
+            n_steps=n_steps,
         )
 
 
 def train_one_episode(agent, env, dataset, n_step: int = 6):
+    if n_step < 1:
+        raise ValueError("n_step must be at least 1")
+
     level_idx = np.random.randint(len(dataset))
     map_matrix, dead_squares = dataset[level_idx]
     env.set_level(map_matrix, dead_squares)
@@ -110,6 +114,7 @@ def train_one_episode(agent, env, dataset, n_step: int = 6):
     episode_reward = 0.0
     episode_loss = []
     episode_transitions = []
+    episode_pushes = []
     done = False
     info = {}
     n_step_buf = deque(maxlen=n_step)
@@ -129,11 +134,13 @@ def train_one_episode(agent, env, dataset, n_step: int = 6):
             else env.get_valid_action_mask()
         )
 
-        n_step_buf.append((obs, action, reward, next_obs, done, next_action_mask))
+        n_step_buf.append((obs, action, action_mask, reward, next_obs, done, next_action_mask))
+        if agent.sil_buffer is not None:
+            episode_pushes.append((obs, action_mask, action, reward))
 
         if len(n_step_buf) == n_step:
-            s0, a0, n_reward, sn, done_n, mask_n = _compute_n_step_return(n_step_buf, agent.gamma)
-            episode_transitions.append((s0, a0, n_reward, sn, done_n, mask_n))
+            episode_transitions.append(_compute_n_step_return(n_step_buf, agent.gamma))
+            n_step_buf.popleft()
 
         loss = agent.optimize()
         if loss is not None:
@@ -145,11 +152,18 @@ def train_one_episode(agent, env, dataset, n_step: int = 6):
         agent.total_steps += 1
 
     while n_step_buf:
-        s0, a0, n_reward, sn, done_n, mask_n = _compute_n_step_return(n_step_buf, agent.gamma)
-        episode_transitions.append((s0, a0, n_reward, sn, done_n, mask_n))
+        episode_transitions.append(_compute_n_step_return(n_step_buf, agent.gamma))
         n_step_buf.popleft()
 
     _store_episode_transitions(agent, episode_transitions, info)
+
+    if info.get("solved") and agent.sil_buffer is not None:
+        solved_pushes = []
+        mc_return = 0.0
+        for state, mask, action, reward in reversed(episode_pushes):
+            mc_return = reward + agent.gamma * mc_return
+            solved_pushes.append(SolvedPush(state, mask, action, mc_return))
+        agent.sil_buffer.push_episode(solved_pushes[::-1])
 
     return {
         "reward": episode_reward,
@@ -211,6 +225,10 @@ def _evaluate_and_checkpoint(agent, env, val_dataset, episode: int,
         f"MeanPushes: {val_metrics['mean_pushes']:.1f}\n"
         f"[Buffer {stats['total']:,}] "
         f"solve={stats['solve_pct']:.1f}% ({stats['solve']}) | "
+        f"solve PER mass={stats['solve_priority_pct']:.1f}% | "
+        f"recent solve PER samples={stats['recent_solve_sample_pct']:.1f}% | "
+        f"SIL episodes={stats['sil_episodes']:,} | "
+        f"recent SIL samples={stats['recent_sil_sample_pct']:.1f}% | "
         f"deadlock={stats['deadlock_pct']:.1f}% | "
         f"timeout={stats['timeout_pct']:.1f}% | "
         f"ongoing={stats['ongoing_pct']:.1f}%"
@@ -224,6 +242,10 @@ def _evaluate_and_checkpoint(agent, env, val_dataset, episode: int,
             "buffer/total": stats["total"],
             "buffer/solve_pct": stats["solve_pct"],
             "buffer/solve_count": stats["solve"],
+            "buffer/solve_priority_pct": stats["solve_priority_pct"],
+            "buffer/recent_solve_sample_pct": stats["recent_solve_sample_pct"],
+            "buffer/sil_episodes": stats["sil_episodes"],
+            "buffer/recent_sil_sample_pct": stats["recent_sil_sample_pct"],
             "buffer/deadlock_pct": stats["deadlock_pct"],
             "buffer/timeout_pct": stats["timeout_pct"],
             "buffer/ongoing_pct": stats["ongoing_pct"],

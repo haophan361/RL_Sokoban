@@ -47,6 +47,7 @@ def main():
     parser.add_argument("--model-path", "-m", type=str, default=None)
     parser.add_argument("--run-id", "-r", type=str, default=None)
     parser.add_argument("--dataset-path","-d", type=str, default=None)
+    parser.add_argument("--checkpoint-dir", type=Path, default=None)
     args = parser.parse_args()
 
     set_seed(42)
@@ -64,11 +65,13 @@ def main():
     val_every = 10_000
     log_every = 2_000
     n_step = 3
+    sil_fraction = 0.15
+    sil_loss_weight = 0.01
 
     base_dir = Path(__file__).parent.parent.resolve()
 
-    checkpoint_path = base_dir / "RL" / "models" / "dqn_sokoban_best.pt"
-    last_checkpoint_path = base_dir / "RL" / "models" / "dqn_sokoban_last.pt"
+    checkpoint_dir = args.checkpoint_dir or base_dir / "RL" / "models"
+    checkpoint_path = checkpoint_dir / "dqn_sokoban_best.pt"
 
     dataset_path = args.dataset_path or os.getenv("DATASET_PATH", "").strip() or None
     if dataset_path:
@@ -97,6 +100,8 @@ def main():
         per_alpha=0.6,
         per_beta_start=0.4,
         per_beta_frames=num_episodes * 50,
+        sil_fraction=sil_fraction,
+        sil_loss_weight=sil_loss_weight,
     )
 
     resume_path = args.model_path or os.getenv("MODEL_PATH", "").strip() or None
@@ -135,6 +140,8 @@ def main():
             "val_every": val_every,
             "log_every": log_every,
             "n_step": n_step,
+            "sil_fraction": sil_fraction,
+            "sil_loss_weight": sil_loss_weight,
             "dataset_path": str(data_dir),
         },
     }
@@ -149,6 +156,7 @@ def main():
     wandb.init(**kwargs)
     print(f"[W&B] Initialized run successfully (Run ID: {wandb.run.id}).")
 
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
     best_val_solve_rate = train_dqn(
         agent=agent,
         env=env,

@@ -13,54 +13,70 @@ if str(_CPP_DIR) not in sys.path:
 import sokoban_cpp
 from dqn_agent import DQNAgent
 
+_DIR_NAMES = {0: "UP", 1: "DOWN", 2: "LEFT", 3: "RIGHT"}
 _DIR_CHAR = {0: 'U', 1: 'D', 2: 'L', 3: 'R'}
-CHECKPOINT_PATH = _RL_DIR / "models" / "dqn_sokoban_best.pt"
+_DIR_DELTA = {0: (-1, 0), 1: (1, 0), 2: (0, -1), 3: (0, 1)}
+
+CHECKPOINT_PATH = _RL_DIR / "models" / "dqn_sokoban_last.pt"
 if not CHECKPOINT_PATH.exists():
     CHECKPOINT_PATH = _RL_DIR / "models" / "dqn_sokoban_last.pt"
 
-def dqn_solver(state, max_pushes=200):
-    start = time()
-    print('Processing DQN......')
+_cached_agent = None
 
-    matrix = state.get_matrix() if hasattr(state, 'get_matrix') else state.matrix
+def get_agent(checkpoint_path=None):
+    global _cached_agent
+    if _cached_agent is not None and checkpoint_path is None:
+        return _cached_agent
 
+    path = Path(checkpoint_path) if checkpoint_path else CHECKPOINT_PATH
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    agent = DQNAgent(device=device, inference_only=True)
+
+    if path.exists():
+        print(f"[DQN] Loading model checkpoint: {path}")
+        agent.load(str(path), load_buffer=False)
+    else:
+        print(f"[DQN] Checkpoint not found: {path}")
+
+    agent.policy_net.eval()
+    if checkpoint_path is None:
+        _cached_agent = agent
+    return agent
+
+def dqn_step_generator(matrix, max_pushes=100, checkpoint_path=None):
+    if hasattr(matrix, "get_matrix"):
+        matrix = matrix.get_matrix()
+    elif hasattr(matrix, "matrix"):
+        matrix = matrix.matrix
+
+    agent = get_agent(checkpoint_path)
     env = sokoban_cpp.SokobanEnv(max_pushes=max_pushes, avoid_dead_squares=False)
     env.set_level(matrix, [])
     obs = env.reset()
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    agent = DQNAgent(
-        lr=1e-4,
-        gamma=0.99,
-        batch_size=64,
-        replay_capacity=1000,
-        epsilon_start=0.0,
-        epsilon_end=0.0,
-        epsilon_decay=1,
-        target_update_frequency=1000,
-        device=device,
-        per_alpha=0.6,
-        per_beta_start=0.4,
-        per_beta_frames=1000,
-    )
-
-    if CHECKPOINT_PATH.exists():
-        agent.load(str(CHECKPOINT_PATH), load_buffer=False)
-    else:
-        print(f'[DQN] Khong tim thay checkpoint: {CHECKPOINT_PATH}')
-        return None
-
-    agent.policy_net.eval()
-
-    full_path = ''
-    node_generated = 0
     done = False
-    info = {}
+    step_idx = 0
 
     while not done:
         action_mask = env.get_valid_action_mask()
         if not action_mask.any():
+            yield {
+                "step": step_idx,
+                "action_id": None,
+                "box_pos": None,
+                "direction": None,
+                "matrix": env.get_matrix(),
+                "boxes": env.get_boxes_position(),
+                "worker": env.get_worker_position(),
+                "docks": env.get_docks_position(),
+                "done": True,
+                "solved": env.is_complete(),
+                "deadlock": True,
+                "timeout": False,
+                "message": "Không còn hành động đẩy hợp lệ (No valid push actions)"
+            }
             break
+
         action_id = agent.select_action(obs, action_mask, training=False)
         if action_id is None:
             break
@@ -70,22 +86,57 @@ def dqn_solver(state, max_pushes=200):
             break
         box_y, box_x, direction = pos_dir
 
-        path_to_push = env.find_path_to_push(box_y, box_x, direction)
-        if path_to_push is not None:
-            for move_idx in path_to_push:
-                full_path += _DIR_CHAR[move_idx]
-                node_generated += 1
-        full_path += _DIR_CHAR[direction]
-        node_generated += 1
-
         obs, reward, done, info = env.step(action_id)
+        step_idx = env.step_count
 
-    elapsed = round(time() - start, 2)
-    if info.get('solved', False):
-        print(f'Time to find solution: {elapsed} seconds')
-        print(f'Number of visited nodes: {node_generated}')
-        print(f'Solution: {full_path}  Number steps: {len(full_path)}')
-        return full_path
+        current_matrix = env.get_matrix()
+        boxes_pos = env.get_boxes_position()
+        worker_pos = env.get_worker_position()
+        docks_pos = env.get_docks_position()
+        is_solved = info.get("solved", False) or env.is_complete()
+        is_deadlock = info.get("deadlock", False)
+        is_timeout = info.get("timeout", False)
+
+        yield {
+            "step": step_idx,
+            "action_id": action_id,
+            "box_pos": (box_y, box_x),
+            "direction": direction,
+            "direction_name": _DIR_NAMES.get(direction, str(direction)),
+            "direction_char": _DIR_CHAR.get(direction, ""),
+            "direction_delta": _DIR_DELTA.get(direction, (0, 0)),
+            "matrix": current_matrix,
+            "boxes": boxes_pos,
+            "worker": worker_pos,
+            "docks": docks_pos,
+            "reward": reward,
+            "done": done,
+            "solved": is_solved,
+            "deadlock": is_deadlock,
+            "timeout": is_timeout,
+            "message": "Success" if is_solved else ("Deadlock" if is_deadlock else "Pushing")
+        }
+
+        if is_solved or done:
+            break
+
+def dqn_solver(state_or_matrix, max_pushes=100):
+    actions_taken = []
+    last_info = None
+
+    for step_info in dqn_step_generator(state_or_matrix, max_pushes=max_pushes):
+        last_info = step_info
+        if step_info["action_id"] is not None:
+            actions_taken.append({
+                "step": step_info["step"],
+                "box_pos": step_info["box_pos"],
+                "direction": step_info["direction"],
+                "direction_name": step_info["direction_name"]
+            })
+
+    if last_info and last_info.get("solved", False):
+        print(f"[DQN] Solved in {len(actions_taken)} pushes!")
+        return actions_taken
     else:
-        print(f'[DQN] Khong giai duoc sau {env.step_count} pushes ({elapsed}s)')
+        print("[DQN] Unsolved or reached limit.")
         return None
