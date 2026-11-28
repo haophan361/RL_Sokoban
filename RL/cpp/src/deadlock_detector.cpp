@@ -1,37 +1,46 @@
 #include "deadlock_detector.h"
-#include <vector>
-#include <utility>
-#include <set>
 
-bool DeadlockDetector::_is_axis_block(const State &state, int y, int x, Axis axis, const std::set<std::pair<int,int>> &visited) {
-    std::vector<std::pair<int,int>> neighbors;
+bool DeadlockDetector::_is_axis_block(const State &state, int y, int x, Axis axis,
+                                     std::set<std::pair<int, int>>& path) {
 
-    if (axis == Axis::Horizontal) {
-        neighbors = {{y, x - 1}, {y, x + 1}};
-    } else {
-        neighbors = {{y - 1, x}, {y + 1, x}};
+    const int dy = axis == Axis::Vertical ? 1 : 0;
+    const int dx = axis == Axis::Horizontal ? 1 : 0;
+    const char before = state.get_matrix_element(y - dy, x - dx);
+    const char after = state.get_matrix_element(y + dy, x + dx);
+
+    if (before == '#' || after == '#') {
+        return true;
     }
 
-    for (const auto& neigh : neighbors) {
-        char cell = state.get_matrix_element(neigh.first, neigh.second);
-
-        if (cell == '#') {
-            return true;
-        } else if (cell == '$' || cell == '*') {
-            if (visited.count({y, x}) || _is_box_frozen(state, neigh.first, neigh.second, visited)) {
-                return true;
-            }
-        }
+    const bool box_before = before == '$' || before == '*';
+    const bool box_after = after == '$' || after == '*';
+    if (!box_before && !box_after) {
+        return false;
     }
-    return false;
+
+    const Axis perpendicular = axis == Axis::Horizontal ? Axis::Vertical : Axis::Horizontal;
+    const auto neighbor_blocks = [&](int neighbor_y, int neighbor_x) {
+
+        return path.count({neighbor_y, neighbor_x}) ||
+               _is_axis_block(state, neighbor_y, neighbor_x, perpendicular, path);
+    };
+
+    path.insert({y, x});
+    const bool blocked = (box_before && neighbor_blocks(y - dy, x - dx)) ||
+                         (box_after && neighbor_blocks(y + dy, x + dx));
+    path.erase({y, x});
+    return blocked;
 }
 
-bool DeadlockDetector::_is_box_frozen(const State &state, int y, int x, const std::set<std::pair<int,int>> &visited) {
-    std::set<std::pair<int,int>> cur_visited = visited;
-    cur_visited.insert({y, x});
+bool DeadlockDetector::is_freeze_deadlock(const State &state, std::pair<int,int> box_pos) {
+    const auto [y, x] = box_pos;
+    if (state.get_matrix_element(y, x) != '$') {
+        return false;
+    }
 
-    return _is_axis_block(state, y, x, Axis::Horizontal, cur_visited) && 
-           _is_axis_block(state, y, x, Axis::Vertical, cur_visited);
+    std::set<std::pair<int, int>> path;
+    return _is_axis_block(state, y, x, Axis::Horizontal, path) &&
+           _is_axis_block(state, y, x, Axis::Vertical, path);
 }
 
 bool DeadlockDetector::is_corner_deadlock(const State &state, std::pair<int,int> box_pos) {
@@ -41,13 +50,6 @@ bool DeadlockDetector::is_corner_deadlock(const State &state, std::pair<int,int>
     bool down= state.get_matrix_element(box_pos.first + 1, box_pos.second) == '#';
 
     if ((left || right) && (up || down)) {
-        return true;
-    }
-    return false;
-}
-
-bool DeadlockDetector::is_freeze_deadlock(const State &state, std::pair<int,int> box_pos) {
-    if (_is_box_frozen(state, box_pos.first, box_pos.second, std::set<std::pair<int,int>>{})) {
         return true;
     }
     return false;

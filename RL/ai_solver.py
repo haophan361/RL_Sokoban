@@ -44,11 +44,6 @@ def get_agent(checkpoint_path=None):
     return agent
 
 def dqn_step_generator(matrix, max_pushes=100, checkpoint_path=None):
-    if hasattr(matrix, "get_matrix"):
-        matrix = matrix.get_matrix()
-    elif hasattr(matrix, "matrix"):
-        matrix = matrix.matrix
-
     agent = get_agent(checkpoint_path)
     env = sokoban_cpp.SokobanEnv(max_pushes=max_pushes, avoid_dead_squares=False)
     env.set_level(matrix, [])
@@ -120,23 +115,3 @@ def dqn_step_generator(matrix, max_pushes=100, checkpoint_path=None):
         if is_solved or done:
             break
 
-def dqn_solver(state_or_matrix, max_pushes=100):
-    actions_taken = []
-    last_info = None
-
-    for step_info in dqn_step_generator(state_or_matrix, max_pushes=max_pushes):
-        last_info = step_info
-        if step_info["action_id"] is not None:
-            actions_taken.append({
-                "step": step_info["step"],
-                "box_pos": step_info["box_pos"],
-                "direction": step_info["direction"],
-                "direction_name": step_info["direction_name"]
-            })
-
-    if last_info and last_info.get("solved", False):
-        print(f"[DQN] Solved in {len(actions_taken)} pushes!")
-        return actions_taken
-    else:
-        print("[DQN] Unsolved or reached limit.")
-        return None

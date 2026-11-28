@@ -179,7 +179,6 @@ def main():
                 ai_generator = None
                 ai_running = False
                 pushes_count = 0
-                last_action_desc = "None"
                 is_completed = False
                 status_text = "Đã Reset về ban đầu"
                 status_color = (180, 200, 240)
@@ -228,16 +227,6 @@ def main():
         btn_load.draw(screen, font_btn)
         btn_start.draw(screen, font_btn)
         btn_reset.draw(screen, font_btn)
-
-        info_x = 395
-        lbl_file = font_info.render(f"Level: {level_name}", True, SUBTEXT_COLOR)
-        screen.blit(lbl_file, (info_x, 10))
-
-        lbl_push = font_info.render(f"Pushes: {pushes_count}", True, TEXT_COLOR)
-        screen.blit(lbl_push, (info_x, 30))
-
-        lbl_action = font_info.render(f"Hành động AI: {last_action_desc}", True, (170, 210, 255))
-        screen.blit(lbl_action, (info_x, 50))
 
         lbl_status = font_status.render(status_text, True, status_color)
         screen.blit(lbl_status, (15, 55))
